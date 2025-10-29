@@ -25,18 +25,24 @@ class AgentConfig:
 
     openai_api_key: str
     openai_model: str = "gpt-5"
-    mcp_base_url: str = "http://localhost:8082/api/jsonrpc"
+    mcp_base_url: str = "http://localhost:8000/mcp/sse"
     poll_initial_interval: timedelta = field(default_factory=lambda: timedelta(seconds=2))
     poll_max_interval: timedelta = field(default_factory=lambda: timedelta(seconds=30))
     poll_timeout: timedelta = field(default_factory=lambda: timedelta(minutes=10))
     poll_backoff_factor: float = 2.0
     worklog_filename: str = "worklog.md"
     project_name: Optional[str] = None
-    workspace_dir: Optional[str] = None
+    workspace_dir: Optional[str] = "/home/pan/workspace"
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
         """Create configuration from environment variables with validation."""
+        # Load .env if available (non-destructive)
+        try:
+            from dotenv import load_dotenv  # type: ignore
+            load_dotenv(override=False)
+        except Exception:
+            pass
         # Validate API key
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
@@ -51,7 +57,7 @@ class AgentConfig:
             raise ValueError(f"Model '{model}' not in supported models: {valid_models}")
 
         # Validate base URL
-        base_url = os.getenv("MCP_BASE_URL", "http://localhost:8082/api/jsonrpc")
+        base_url = os.getenv("MCP_BASE_URL", "http://localhost:8000/mcp/sse")
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("MCP_BASE_URL must be a valid HTTP/HTTPS URL")
 
@@ -67,7 +73,8 @@ class AgentConfig:
             raise ValueError("MCP_POLL_TIMEOUT_SECONDS must be greater than MCP_POLL_MAX_SECONDS")
 
         project = os.getenv("PROJECT_NAME")
-        workspace_dir = os.getenv("WORKSPACE_DIR")
+        # Default workspace directory; allow override via env
+        workspace_dir = os.getenv("WORKSPACE_DIR", "/home/pan/workspace")
 
         try:
             backoff = float(os.getenv("MCP_POLL_BACKOFF_FACTOR", "2.0"))

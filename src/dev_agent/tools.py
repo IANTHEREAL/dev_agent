@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -15,7 +16,11 @@ class MCPError(RuntimeError):
 
 
 class MCPClient:
-    """Lightweight JSON-RPC client for MCP tools with retry logic."""
+    """Lightweight MCP client posting JSON-RPC to a single endpoint.
+
+    Expects base_url to be the Streamable HTTP endpoint (e.g., http://localhost:8000/mcp/sse).
+    Optional GET SSE stream is not used by this client.
+    """
 
     def __init__(
         self,
@@ -26,25 +31,99 @@ class MCPClient:
         max_retries: int = 3,
     ) -> None:
         self._session = session or requests.Session()
-        self._base_url = base_url
+        base = (base_url or "http://localhost:8000/mcp/sse").rstrip("/")
+        self._rpc_url = base
         self._timeout = timeout
         self._max_retries = max_retries
         self._request_id = 0
+        self._session_id = str(uuid.uuid4())
+
+    @staticmethod
+    def _parse_sse_json(text: str) -> Dict[str, Any]:
+        """Parse a Server-Sent Events payload and return the first JSON object.
+
+        Aggregates contiguous `data:` lines within an event and attempts to
+        json.loads the combined payload. Returns the first successfully parsed
+        JSON object.
+        """
+        events = text.split("\n\n")
+        for evt in events:
+            if not evt.strip():
+                continue
+            data_lines: List[str] = []
+            for line in evt.splitlines():
+                if line.startswith("data: "):
+                    data_lines.append(line[len("data: "):])
+            if not data_lines:
+                continue
+            payload = "\n".join(data_lines)
+            try:
+                return json.loads(payload)
+            except Exception:  # noqa: BLE001
+                continue
+        raise ValueError("No JSON data event in SSE response")
+
+    def _rpc_post(self, url: str, body: Dict[str, Any]) -> requests.Response:
+        headers = {
+            # Streamable HTTP requires accepting both JSON responses and SSE
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "Mcp-Session-Id": self._session_id,
+        }
+        return self._session.post(url, json=body, headers=headers, timeout=self._timeout)
 
     def _call(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         self._request_id += 1
-        payload = {"jsonrpc": "2.0", "id": self._request_id, "method": method, "params": params}
 
         last_exception: Optional[Exception] = None
 
+        payload = {"jsonrpc": "2.0", "id": self._request_id, "method": method, "params": params}
+
         for attempt in range(self._max_retries):
             try:
-                response = self._session.post(self._base_url, json=payload, timeout=self._timeout)
-                response.raise_for_status()
-                body = response.json()
-                if "error" in body:
-                    raise MCPError(body["error"])
-                return body["result"]
+                # Primary: Streamable HTTP JSON-RPC at /mcp/sse (or provided endpoint)
+                logger.debug("MCP POST %s attempt %s to %s", method, attempt + 1, self._rpc_url)
+                primary_resp = self._rpc_post(self._rpc_url, payload)
+                try:
+                    primary_resp.raise_for_status()
+                    ct = primary_resp.headers.get("Content-Type", "")
+                    logger.debug("MCP response %s CT=%s", primary_resp.status_code, ct)
+                    if "text/event-stream" in ct:
+                        sse_preview = primary_resp.text[:1000]
+                        logger.debug("MCP SSE preview: %r", sse_preview)
+                        body = self._parse_sse_json(primary_resp.text)
+                    else:
+                        try:
+                            body = primary_resp.json()
+                        except ValueError as json_exc:
+                            preview = primary_resp.text[:1000]
+                            logger.error(
+                                "MCP response not JSON (status %s, CT=%s). First 1000 bytes: %r",
+                                primary_resp.status_code,
+                                ct,
+                                preview,
+                            )
+                            raise json_exc
+                    if "error" in body:
+                        raise MCPError(body["error"])  # type: ignore[unreachable]
+                    # Some servers wrap JSON-RPC inside SSE data events
+                    if isinstance(body, dict) and "result" in body:
+                        result_obj = body["result"]
+                        if isinstance(result_obj, dict) and "structuredContent" in result_obj:
+                            return result_obj["structuredContent"]
+                        return result_obj
+                    return body
+                except requests.HTTPError as http_exc:
+                    ct = primary_resp.headers.get("Content-Type", "")
+                    preview = primary_resp.text[:500]
+                    logger.error(
+                        "MCP HTTP error %s for %s (CT=%s): %r",
+                        primary_resp.status_code,
+                        method,
+                        ct,
+                        preview,
+                    )
+                    raise http_exc
             except Exception as exc:  # noqa: BLE001
                 last_exception = exc
                 if attempt < self._max_retries - 1:
@@ -175,6 +254,8 @@ class ToolHandler:
             agent=agent,
             num_branches=num_branches,
         )
+        if isinstance(response, dict) and ("error" in response or response.get("isError")):
+            raise ToolExecutionError(str(response.get("error") or response))
         branches = response.get("branches") if isinstance(response, dict) else None
         primary_branch = branches[0] if isinstance(branches, list) and branches else None
         branch_id = primary_branch.get("branch_id") if isinstance(primary_branch, dict) else None

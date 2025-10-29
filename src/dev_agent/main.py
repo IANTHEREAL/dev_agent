@@ -73,8 +73,7 @@ class LLMBrain:
                 kwargs: Dict[str, Any] = {
                     "model": self._model,
                     "messages": messages,
-                    "temperature": 0.1,
-                    "max_tokens": 4000,
+                    "max_completion_tokens": 4000,
                 }
                 if tools:
                     kwargs["tools"] = tools
@@ -196,7 +195,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--task", required=True, help="User task description")
     parser.add_argument("--parent-branch-id", required=True, help="Parent branch UUID")
     parser.add_argument("--project-name", help="Optional project name override")
-    parser.add_argument("--workspace-dir", help="Optional workspace directory for artifacts")
     args = parser.parse_args(argv)
 
     try:
@@ -207,15 +205,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.project_name:
         cfg = replace(cfg, project_name=args.project_name)
-    if args.workspace_dir:
-        cfg = replace(cfg, workspace_dir=args.workspace_dir)
+    # workspace_dir is fixed to /home/pan/workspace by default; env can override if needed
 
     if not cfg.project_name:
         logger.error("Project name must be provided via PROJECT_NAME or --project-name")
         return 1
-    if not cfg.workspace_dir:
-        logger.error("Workspace directory must be provided via WORKSPACE_DIR or --workspace-dir")
-        return 1
+    # workspace_dir is provided by config (defaults to /home/pan/workspace)
 
     brain = LLMBrain(cfg.openai_api_key, cfg.openai_model)
     mcp_client = MCPClient(cfg.mcp_base_url)

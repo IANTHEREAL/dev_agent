@@ -10,11 +10,19 @@
 - Provide a final detailed report for implementation.
 
 ## Usage Notes
-1. Set environment variables:
+1. Configure environment (either .env or exports):
    ```bash
-   export OPENAI_API_KEY=...
-   export PROJECT_NAME=my-project
-   export MCP_BASE_URL=http://localhost:8082/api/jsonrpc
+   # Option A: create a .env file at repo root
+   cat > .env << 'EOF'
+   OPENAI_API_KEY=sk-...
+   PROJECT_NAME=my-project
+   MCP_BASE_URL=http://localhost:8000/mcp/sse
+   EOF
+
+   # Option B: export vars in your shell
+   # export OPENAI_API_KEY=...
+   # export PROJECT_NAME=my-project
+   # export MCP_BASE_URL=http://localhost:8000/mcp/sse
    ```
 2. Install dependencies:
    ```bash
@@ -23,7 +31,10 @@
 3. Execute:
    ```bash
    dev-agent --task "Add pagination to orders API" \
-     --parent-branch-id 123e4567-e89b-12d3-a456-426614174000 \
-     --workspace-dir /home/pan/workspace
+     --parent-branch-id 123e4567-e89b-12d3-a456-426614174000
+   ```
+   Or use interactive chat:
+   ```bash
+   dev-agent-chat --parent-branch-id 123e4567-e89b-12d3-a456-426614174000 --task "Add pagination to orders API"
    ```
 4. CLI prints JSON summary with branch IDs and final status.
