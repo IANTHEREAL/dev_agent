@@ -45,8 +45,8 @@ class AgentConfig:
             raise ValueError("OPENAI_API_KEY should start with 'sk-'")
 
         # Validate model
-        model = os.getenv("GPT5_AGENT_MODEL", "gpt-5")
-        valid_models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-5"]
+        model = "gpt-5"
+        valid_models = ["gpt-5"]
         if model not in valid_models:
             raise ValueError(f"Model '{model}' not in supported models: {valid_models}")
 

@@ -24,45 +24,38 @@ logger = logging.getLogger("dev_agent")
 
 MAX_ITERATIONS = 20
 
-SYSTEM_PROMPT = """You orchestrate the CLAUDE.md workflow for dev_agent.
+SYSTEM_PROMPT = """You orchestrate Test Drive Development workflow.
 
 Agents:
 - claude_code — implements solution and tests, following red→green→refactor. Must summarize changes and tests in worklog.md.
-- codex — reviews code + tests, flags only P0/P1 issues with evidence, and records conclusions in worklog.md and review.log.
+- codex — reviews, flags only P0/P1 issues with evidence, and records verified P0/p1 issues in worklog.md and codex_review.log.
 
 Phase Flow:
 1. Implementation run (claude_code): gather context, design quickly, add/adjust tests, implement, ensure suite passes, update worklog.md.
-2. Review run (codex): read worklog.md & relevant artifacts, evaluate implementation and tests, report P0/P1 issues or state none found, update worklog.md and review.log.
-3. Fix run (claude_code, if needed): read latest logs, address every reported issue, extend tests where needed, note fixes in worklog.md. Repeat review afterwards until clean.
+2. Review run (codex): read worklog.md & relevant artifacts, evaluate implementation and tests, report P0/P1 issues or state none found, update worklog.md and codex_review.log.
+3. Fix run (claude_code, if needed): read codex_review.log, address every reported issue, extend tests where needed, note fixes in worklog.md. Repeat review afterwards until clean.
 
 Orchestration Rules:
-- Before launching a phase, read the newest worklog.md and any other necessary artifacts (e.g., review.log) via read_artifact.
 - Call execute_agent with num_branches=1. Provide a prompt that includes:
   • The original user task.
   • The immediate goal for this phase.
   • Essential context: workspace_dir, parent_branch_id, key artifacts to consult, known issues.
   • Phase-specific expectations (implementation steps vs. review checks vs. fixes).
 - After each execute_agent call, invoke check_status once; the tool will poll until completion. Record branch_id and final status.
+- Before launching a fix run, read codex_review.log via read_artifact from preview review phase.
 - Maintain branch lineage, surface errors from failed runs, and decide follow-up actions (rerun, proceed, or terminate).
 
 Stop when the latest codex review reports no P0/P1 issues and any required fix pass has succeeded. Then reply with JSON only:
 {{
   "type": "final_report",
   "task": "<task description>",
-  "summary": "<concise outcome>",
-  "impl_branch_id": "<uuid or null>",
-  "review_branch_id": "<uuid or null>",
-  "fix_branch_id": "<uuid or null>",
-  "final_branch_id": "<uuid of the branch containing the final state>",
-  "impl_status": "<status or null>",
-  "review_status": "<status or null>",
-  "fix_status": "<status or null>"
+  "summary": "<concise outcome>"
 }}
 
 Do not include any extra text outside of the JSON object."""
 
 
-class GPT5Brain:
+class LLMBrain:
     """Thin wrapper around the OpenAI Chat Completions API with retry logic."""
 
     def __init__(self, api_key: str, model: str, max_retries: int = 3) -> None:
@@ -114,9 +107,8 @@ def build_initial_messages(task: str, cfg: AgentConfig, parent_branch_id: str) -
         "parent_branch_id": parent_branch_id,
         "project_name": cfg.project_name,
         "workspace_dir": cfg.workspace_dir,
-        "worklog_filename": cfg.worklog_filename,
         "notes": (
-            "For every phase: read worklog.md (and review.log if present), craft an execute_agent prompt "
+            "For every phase: read worklog.md (and codex_review.log if present), craft an execute_agent prompt "
             "covering task, phase goal, context, and expectations, run with num_branches=1, then call "
             "check_status once. Track branch lineage and stop when codex reports no P0/P1 issues."
         ),
@@ -164,7 +156,7 @@ def parse_final_report(message: Any) -> Optional[Dict[str, Any]]:
 
 
 def orchestrate(
-    brain: GPT5Brain,
+    brain: LLMBrain,
     handler: ToolHandler,
     messages: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -225,7 +217,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("Workspace directory must be provided via WORKSPACE_DIR or --workspace-dir")
         return 1
 
-    brain = GPT5Brain(cfg.openai_api_key, cfg.openai_model)
+    brain = LLMBrain(cfg.openai_api_key, cfg.openai_model)
     mcp_client = MCPClient(cfg.mcp_base_url)
     handler = ToolHandler(mcp_client, cfg.project_name)
 
