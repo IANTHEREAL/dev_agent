@@ -40,39 +40,49 @@ class MCPClient:
 
     @staticmethod
     def _parse_sse_json(text: str) -> Dict[str, Any]:
-        """Parse a Server-Sent Events payload and return the first JSON object.
+        """Return the first JSON object from a standards-compliant SSE payload."""
+        text = text.replace("\r\n", "\n")
+        buf: List[str] = []
 
-        Aggregates contiguous `data:` lines within an event and attempts to
-        json.loads the combined payload. Returns the first successfully parsed
-        JSON object.
-        """
-        events = text.split("\n\n")
-        for evt in events:
-            if not evt.strip():
-                continue
-            data_lines: List[str] = []
-            for line in evt.splitlines():
-                if line.startswith("data: "):
-                    data_lines.append(line[len("data: "):])
-            if not data_lines:
-                continue
-            payload = "\n".join(data_lines)
+        def flush() -> Optional[Dict[str, Any]]:
+            if not buf:
+                return None
             try:
-                return json.loads(payload)
-            except Exception:  # noqa: BLE001
+                return json.loads("\n".join(buf))
+            except Exception:
+                return None
+
+        for line in text.splitlines():
+            if not line:
+                obj = flush()
+                if obj is not None:
+                    return obj
+                buf = []
                 continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                content = line[5:]
+                if content.startswith(" "):
+                    content = content[1:]
+                buf.append(content)
+
+        obj = flush()
+        if obj is not None:
+            return obj
         raise ValueError("No JSON data event in SSE response")
 
-    def _rpc_post(self, url: str, body: Dict[str, Any]) -> requests.Response:
+
+    def _rpc_post(self, url: str, body: Dict[str, Any], *, timeout: Optional[float] = None) -> requests.Response:
         headers = {
             # Streamable HTTP requires accepting both JSON responses and SSE
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
             "Mcp-Session-Id": self._session_id,
         }
-        return self._session.post(url, json=body, headers=headers, timeout=self._timeout)
+        return self._session.post(url, json=body, headers=headers, timeout=timeout or self._timeout)
 
-    def _call(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _call(self, method: str, params: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
         self._request_id += 1
 
         last_exception: Optional[Exception] = None
@@ -83,7 +93,7 @@ class MCPClient:
             try:
                 # Primary: Streamable HTTP JSON-RPC at /mcp/sse (or provided endpoint)
                 logger.debug("MCP POST %s attempt %s to %s", method, attempt + 1, self._rpc_url)
-                primary_resp = self._rpc_post(self._rpc_url, payload)
+                primary_resp = self._rpc_post(self._rpc_url, payload, timeout=timeout)
                 try:
                     primary_resp.raise_for_status()
                     ct = primary_resp.headers.get("Content-Type", "")
@@ -91,7 +101,15 @@ class MCPClient:
                     if "text/event-stream" in ct:
                         sse_preview = primary_resp.text[:1000]
                         logger.debug("MCP SSE preview: %r", sse_preview)
-                        body = self._parse_sse_json(primary_resp.text)
+                        try:
+                            body = self._parse_sse_json(primary_resp.text)
+                        except Exception as parse_exc:  # noqa: BLE001
+                            logger.warning(
+                                "Failed to parse SSE JSON for %s. Preview: %r",
+                                method,
+                                sse_preview,
+                            )
+                            raise parse_exc
                     else:
                         try:
                             body = primary_resp.json()
@@ -142,8 +160,8 @@ class MCPClient:
 
         raise last_exception or MCPError("Unknown MCP error")
 
-    def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        return self._call("tools/call", {"name": name, "arguments": arguments})
+    def call_tool(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        return self._call("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
 
     def parallel_explore(
         self,
@@ -165,7 +183,7 @@ class MCPClient:
         )
 
     def get_branch(self, branch_id: str) -> Dict[str, Any]:
-        return self.call_tool("get_branch", {"branch_id": branch_id})
+        return self.call_tool("get_branch", {"branch_id": branch_id}, timeout=max(self._timeout, 300.0))
 
     def branch_read_file(self, branch_id: str, file_path: str) -> Dict[str, Any]:
         return self.call_tool("branch_read_file", {"branch_id": branch_id, "file_path": file_path})
