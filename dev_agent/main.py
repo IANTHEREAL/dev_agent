@@ -44,7 +44,9 @@ SYSTEM_PROMPT = """You are a TDD (Test-Drive Development) workflow orchestrator.
 
 ### Agent Prompt Templates
 
-#### Phase 1: Implement (claude_code)
+Use the following prompt, Fill in the correct task and issues.
+
+#### Implement (claude_code)
 
 Analyze, Design, Implement and Test.
 
@@ -67,7 +69,7 @@ Analyze, Design, Implement and Test.
 
 ---
 
-#### Phase 2: Review (codex)
+#### Review (codex)
 
 Perform a comprehensive code review to find P0 and P1 issues.
 
@@ -88,7 +90,7 @@ Perform a comprehensive code review to find P0 and P1 issues.
 
 ---
 
-#### Phase 3: Fix (claude_code)
+####  Fix (claude_code)
 
 Fix all P0/P1 issues reported in the review.
 
