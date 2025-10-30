@@ -42,7 +42,7 @@ Orchestration Rules:
   • Essential context: workspace_dir, parent_branch_id, key artifacts to consult, known issues.
   • Phase-specific expectations (implementation steps vs. review checks vs. fixes).
 - After each execute_agent call, invoke check_status once; the tool will poll until completion. Record branch_id and final status.
-- Before launching a fix run, read codex_review.log via read_artifact from preview review phase.
+- Before and only before launching a fix run, read codex_review.log via read_artifact to get the review concusion.
 - Maintain branch lineage, surface errors from failed runs, and decide follow-up actions (rerun, proceed, or terminate).
 
 Stop when the latest codex review reports no P0/P1 issues and any required fix pass has succeeded. Then reply with JSON only:
@@ -113,7 +113,7 @@ def build_initial_messages(task: str, cfg: AgentConfig, parent_branch_id: str) -
         "project_name": cfg.project_name,
         "workspace_dir": cfg.workspace_dir,
         "notes": (
-            "For every phase: read worklog.md (and codex_review.log if present), craft an execute_agent prompt "
+            "For every phase: craft an execute_agent prompt "
             "covering task, phase goal, context, and expectations, run with num_branches=1, then call "
             "check_status once. Track branch lineage and stop when codex reports no P0/P1 issues."
         ),

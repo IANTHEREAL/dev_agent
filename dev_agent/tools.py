@@ -40,36 +40,78 @@ class MCPClient:
 
     @staticmethod
     def _parse_sse_json(text: str) -> Dict[str, Any]:
-        """Return the first JSON object from a standards-compliant SSE payload."""
-        text = text.replace("\r\n", "\n")
-        buf: List[str] = []
+        """Return the first JSON object from an SSE payload or raise."""
+        normalized = text.replace("\r\n", "\n")
 
-        def flush() -> Optional[Dict[str, Any]]:
-            if not buf:
-                return None
-            try:
-                return json.loads("\n".join(buf))
-            except Exception:
-                return None
+        # Parse SSE events into dictionaries of {event, data: [chunks]}
+        events: List[Dict[str, Any]] = []
+        current_event: Dict[str, Any] = {}
 
-        for line in text.splitlines():
-            if not line:
-                obj = flush()
-                if obj is not None:
-                    return obj
-                buf = []
+        for raw_line in normalized.split("\n"):
+            line = raw_line.rstrip("\r")
+
+            if line == "":
+                if current_event:
+                    events.append(current_event)
+                    current_event = {}
                 continue
+
             if line.startswith(":"):
+                # SSE comment line
                 continue
-            if line.startswith("data:"):
-                content = line[5:]
-                if content.startswith(" "):
-                    content = content[1:]
-                buf.append(content)
 
-        obj = flush()
-        if obj is not None:
-            return obj
+            if ":" not in line:
+                # Not a standard field, skip
+                continue
+
+            field, value = line.split(":", 1)
+            field = field.strip()
+            value = value.lstrip(" ")
+
+            if field == "event":
+                current_event["event"] = value
+            elif field == "data":
+                current_event.setdefault("data", []).append(value)
+
+        if current_event:
+            events.append(current_event)
+
+        # Try parsing JSON from each data chunk / combined data payload
+        for event in events:
+            data_lines = event.get("data") or []
+
+            for chunk in data_lines:
+                candidate = chunk.strip()
+                if not candidate or candidate in {"[DONE]", "DONE"}:
+                    continue
+                if candidate[0] in "{[":
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        continue
+
+            joined = "\n".join(data_lines).strip()
+            if joined and joined[0] in "{[":
+                try:
+                    return json.loads(joined)
+                except json.JSONDecodeError:
+                    pass
+
+        # Fallback: scan the raw payload for the first JSON object/array
+        decoder = json.JSONDecoder()
+        for start_char in ("{", "["):
+            search_index = 0
+            while True:
+                idx = normalized.find(start_char, search_index)
+                if idx == -1:
+                    break
+                try:
+                    obj, _ = decoder.raw_decode(normalized[idx:])
+                    return obj
+                except json.JSONDecodeError:
+                    search_index = idx + 1
+
+        logger.warning("Failed to parse SSE JSON. Raw response:\n%s", text)
         raise ValueError("No JSON data event in SSE response")
 
 
@@ -104,11 +146,13 @@ class MCPClient:
                         try:
                             body = self._parse_sse_json(primary_resp.text)
                         except Exception as parse_exc:  # noqa: BLE001
-                            logger.warning(
-                                "Failed to parse SSE JSON for %s. Preview: %r",
+                            logger.error(
+                                "Failed to parse SSE JSON for %s. Content-Type: %s, Status: %s",
                                 method,
-                                sse_preview,
+                                ct,
+                                primary_resp.status_code,
                             )
+                            logger.error("Full SSE response:\n%s", primary_resp.text)
                             raise parse_exc
                     else:
                         try:
