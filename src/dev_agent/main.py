@@ -1,4 +1,4 @@
-"""OpenAI tool-calling orchestrator for the CLAUDE.md workflow."""
+"""Unified CLI: headless and chat modes for the CLAUDE.md workflow."""
 
 from __future__ import annotations
 
@@ -99,6 +99,12 @@ class LLMBrain:
         raise last_exception or RuntimeError("Unknown OpenAI API error")
 
 
+def _print_assistant_message(message: Any) -> None:
+    content = getattr(message, "content", None)
+    if content:
+        print(f"assistant> {content}")
+
+
 def build_initial_messages(task: str, cfg: AgentConfig, parent_branch_id: str) -> List[Dict[str, Any]]:
     """Create the system and user messages that kick off the orchestrator loop."""
     user_payload = {
@@ -190,11 +196,76 @@ def orchestrate(
     return None
 
 
+def chat_loop(
+    brain: LLMBrain,
+    handler: ToolHandler,
+    messages: List[Dict[str, Any]],
+    *,
+    max_iterations: int = MAX_ITERATIONS,
+) -> Optional[Dict[str, Any]]:
+    tools = get_tool_definitions()
+
+    for iteration in range(1, max_iterations + 1):
+        print(f"[iter {iteration}] requesting completion...")
+        response = brain.complete(messages, tools=tools)
+        choice = response.choices[0].message
+        _print_assistant_message(choice)
+        messages.append(
+            {
+                "role": "assistant",
+                "content": choice.content or "",
+                **(
+                    {
+                        "tool_calls": [
+                            {
+                                "id": c.id,
+                                "type": c.type,
+                                "function": {
+                                    "name": c.function.name,
+                                    "arguments": c.function.arguments,
+                                },
+                            }
+                            for c in (choice.tool_calls or [])
+                        ]
+                    }
+                    if getattr(choice, "tool_calls", None)
+                    else {}
+                ),
+            }
+        )
+
+        tool_calls = getattr(choice, "tool_calls", None) or []
+        if tool_calls:
+            for tool_call in tool_calls:
+                fn = tool_call.function
+                print(f"tool> {fn.name} {fn.arguments}")
+                result = handler.handle(tool_call)
+                print(f"tool< {json.dumps(result)[:2000]}")
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(result),
+                    }
+                )
+            continue
+
+        final_report = parse_final_report(choice)
+        if final_report:
+            print("assistant< final_report")
+            return final_report
+        print("assistant< not final yet, continuing...")
+
+    print("error: reached iteration limit without final report", file=sys.stderr)
+    return None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="GPT-5 tool-calling orchestrator")
-    parser.add_argument("--task", required=True, help="User task description")
+    parser = argparse.ArgumentParser(description="GPT-5 tool-calling orchestrator (headless or chat)")
+    parser.add_argument("--task", help="User task description; prompts if omitted")
     parser.add_argument("--parent-branch-id", required=True, help="Parent branch UUID")
     parser.add_argument("--project-name", help="Optional project name override")
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode (no chat prints)")
     args = parser.parse_args(argv)
 
     try:
@@ -205,24 +276,30 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.project_name:
         cfg = replace(cfg, project_name=args.project_name)
-    # workspace_dir is fixed to /home/pan/workspace by default; env can override if needed
 
     if not cfg.project_name:
         logger.error("Project name must be provided via PROJECT_NAME or --project-name")
         return 1
-    # workspace_dir is provided by config (defaults to /home/pan/workspace)
+
+    # Single CLI: default to chat; enable headless with flag
+    headless = bool(args.headless)
+
+    task = args.task or input("you> Enter task description: ")
+    if not task.strip():
+        print("error: task is required", file=sys.stderr)
+        return 1
 
     brain = LLMBrain(cfg.openai_api_key, cfg.openai_model)
     mcp_client = MCPClient(cfg.mcp_base_url)
     handler = ToolHandler(mcp_client, cfg.project_name)
 
-    messages = build_initial_messages(args.task, cfg, args.parent_branch_id)
-    final_report = orchestrate(brain, handler, messages)
+    messages = build_initial_messages(task, cfg, args.parent_branch_id)
+    final_report = orchestrate(brain, handler, messages) if headless else chat_loop(brain, handler, messages)
 
     if not final_report:
         return 1
 
-    final_report.setdefault("task", args.task)
+    final_report.setdefault("task", task)
     print(json.dumps(final_report, indent=2))
     return 0
 
