@@ -330,7 +330,7 @@ class ToolHandler:
         branch_id = arguments.get("branch_id")
         if not branch_id or not isinstance(branch_id, str):
             raise ToolExecutionError("`branch_id` string argument is required.")
-        timeout_seconds = arguments.get("timeout_seconds", 600)
+        timeout_seconds = arguments.get("timeout_seconds", 1800)
         poll_interval = arguments.get("poll_interval_seconds", 3.0)
         max_interval = arguments.get("max_poll_interval_seconds", 30.0)
 
@@ -457,7 +457,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                         "timeout_seconds": {
                             "type": "number",
                             "description": "Optional upper bound on how long to poll before failing.",
-                            "default": 600,
+                            "default": 1800,
                         },
                         "poll_interval_seconds": {
                             "type": "number",
