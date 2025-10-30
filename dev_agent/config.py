@@ -23,8 +23,10 @@ def _get_env_timedelta(name: str, default_seconds: int) -> timedelta:
 class AgentConfig:
     """Holds runtime configuration for the orchestrator."""
 
-    openai_api_key: str
-    openai_model: str = "gpt-5"
+    azure_api_key: str
+    azure_endpoint: str
+    azure_deployment: str
+    azure_api_version: str = "2024-12-01-preview"
     mcp_base_url: str = "http://localhost:8000/mcp/sse"
     poll_initial_interval: timedelta = field(default_factory=lambda: timedelta(seconds=2))
     poll_max_interval: timedelta = field(default_factory=lambda: timedelta(seconds=30))
@@ -40,21 +42,29 @@ class AgentConfig:
         # Load .env if available (non-destructive)
         try:
             from dotenv import load_dotenv  # type: ignore
-            load_dotenv(override=False)
-        except Exception:
-            pass
-        # Validate API key
-        api_key = os.getenv("OPENAI_API_KEY")
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "python-dotenv is required to load configuration from .env files"
+            ) from exc
+        load_dotenv(override=False)
+        # Validate Azure OpenAI credentials
+        api_key = os.getenv("AZURE_OPENAI_API_KEY")
         if not api_key:
-            raise EnvironmentError("OPENAI_API_KEY must be set")
-        if not api_key.startswith("sk-"):
-            raise ValueError("OPENAI_API_KEY should start with 'sk-'")
+            raise EnvironmentError("AZURE_OPENAI_API_KEY must be set")
 
-        # Validate model
-        model = "gpt-5"
-        valid_models = ["gpt-5"]
-        if model not in valid_models:
-            raise ValueError(f"Model '{model}' not in supported models: {valid_models}")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        if not endpoint:
+            raise EnvironmentError("AZURE_OPENAI_ENDPOINT must be set")
+        if not endpoint.startswith("https://"):
+            raise ValueError("AZURE_OPENAI_ENDPOINT must start with 'https://'")
+
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        if not deployment:
+            raise EnvironmentError("AZURE_OPENAI_DEPLOYMENT must be set")
+
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        if not api_version:
+            raise ValueError("AZURE_OPENAI_API_VERSION must be non-empty")
 
         # Validate base URL
         base_url = os.getenv("MCP_BASE_URL", "http://localhost:8000/mcp/sse")
@@ -84,8 +94,10 @@ class AgentConfig:
             raise ValueError("MCP_POLL_BACKOFF_FACTOR must be a float greater than 1.0") from exc
 
         return cls(
-            openai_api_key=api_key,
-            openai_model=model,
+            azure_api_key=api_key,
+            azure_endpoint=endpoint.rstrip("/"),
+            azure_deployment=deployment,
+            azure_api_version=api_version,
             mcp_base_url=base_url,
             poll_initial_interval=poll_initial,
             poll_max_interval=poll_max,

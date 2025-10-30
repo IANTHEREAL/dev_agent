@@ -10,7 +10,7 @@ import time
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
+from openai import AzureOpenAI
 
 from .config import AgentConfig
 from .tools import MCPClient, ToolHandler, get_tool_definitions
@@ -56,11 +56,22 @@ Do not include any extra text outside of the JSON object."""
 
 
 class LLMBrain:
-    """Thin wrapper around the OpenAI Chat Completions API with retry logic."""
+    """Thin wrapper around the Azure OpenAI Chat Completions API with retry logic."""
 
-    def __init__(self, api_key: str, model: str, max_retries: int = 3) -> None:
-        self._client = OpenAI(api_key=api_key)
-        self._model = model
+    def __init__(
+        self,
+        api_key: str,
+        endpoint: str,
+        deployment: str,
+        api_version: str,
+        max_retries: int = 3,
+    ) -> None:
+        self._client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=api_version,
+        )
+        self._deployment = deployment
         self._max_retries = max_retries
 
     def complete(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Any:
@@ -71,7 +82,7 @@ class LLMBrain:
         for attempt in range(self._max_retries):
             try:
                 kwargs: Dict[str, Any] = {
-                    "model": self._model,
+                    "model": self._deployment,
                     "messages": messages,
                     "max_completion_tokens": 4000,
                 }
@@ -86,7 +97,7 @@ class LLMBrain:
                 if attempt < self._max_retries - 1:
                     wait_time = 2 ** attempt
                     logger.warning(
-                        "OpenAI call failed (attempt %s/%s): %s. Retrying in %ss...",
+                        "Azure OpenAI call failed (attempt %s/%s): %s. Retrying in %ss...",
                         attempt + 1,
                         self._max_retries,
                         exc,
@@ -94,9 +105,9 @@ class LLMBrain:
                     )
                     time.sleep(wait_time)
                 else:
-                    logger.error("OpenAI call failed after retries: %s", exc)
+                    logger.error("Azure OpenAI call failed after retries: %s", exc)
 
-        raise last_exception or RuntimeError("Unknown OpenAI API error")
+        raise last_exception or RuntimeError("Unknown Azure OpenAI API error")
 
 
 def _print_assistant_message(message: Any) -> None:
@@ -289,7 +300,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("error: task is required", file=sys.stderr)
         return 1
 
-    brain = LLMBrain(cfg.openai_api_key, cfg.openai_model)
+    brain = LLMBrain(
+        cfg.azure_api_key,
+        cfg.azure_endpoint,
+        cfg.azure_deployment,
+        cfg.azure_api_version,
+    )
     mcp_client = MCPClient(cfg.mcp_base_url)
     handler = ToolHandler(mcp_client, cfg.project_name)
 

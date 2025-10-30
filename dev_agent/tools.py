@@ -330,8 +330,54 @@ class ToolHandler:
         branch_id = arguments.get("branch_id")
         if not branch_id or not isinstance(branch_id, str):
             raise ToolExecutionError("`branch_id` string argument is required.")
-        logger.info("Checking status for branch %s", branch_id)
-        return self._client.get_branch(branch_id)
+        timeout_seconds = arguments.get("timeout_seconds", 600)
+        poll_interval = arguments.get("poll_interval_seconds", 3.0)
+        max_interval = arguments.get("max_poll_interval_seconds", 30.0)
+
+        if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+            raise ToolExecutionError("`timeout_seconds` must be a positive number if provided.")
+        if not isinstance(poll_interval, (int, float)) or poll_interval <= 0:
+            raise ToolExecutionError("`poll_interval_seconds` must be a positive number if provided.")
+        if not isinstance(max_interval, (int, float)) or max_interval < poll_interval:
+            raise ToolExecutionError("`max_poll_interval_seconds` must be a number >= poll_interval_seconds.")
+
+        def _status_lower(value: Optional[str]) -> str:
+            return (value or "").strip().lower()
+
+        attempt = 0
+        deadline = time.monotonic() + float(timeout_seconds)
+        sleep_interval = float(poll_interval)
+
+        logger.info("Checking status for branch %s (timeout=%ss)", branch_id, timeout_seconds)
+
+        while True:
+            attempt += 1
+            response = self._client.get_branch(branch_id)
+            status = _status_lower(response.get("status"))
+            logger.info(
+                "Branch %s response (attempt %s): %s",
+                branch_id,
+                attempt,
+                json.dumps(response, ensure_ascii=False),
+            )
+
+            if status in {"succeed", "failed"}:
+                return response
+
+            if time.monotonic() >= deadline:
+                raise ToolExecutionError(
+                    f"Timed out waiting for branch {branch_id} to finish. "
+                    f"Last status={status or 'unknown'}."
+                )
+
+            logger.info(
+                "Branch %s still active (status=%s). Sleeping %.1fs.",
+                branch_id,
+                status or "unknown",
+                sleep_interval,
+            )
+            time.sleep(sleep_interval)
+            sleep_interval = min(sleep_interval * 1.5, float(max_interval))
 
     def _read_artifact(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         branch_id = arguments.get("branch_id")
@@ -407,6 +453,21 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                         "branch_id": {
                             "type": "string",
                             "description": "Branch UUID returned from execute_agent.",
+                        },
+                        "timeout_seconds": {
+                            "type": "number",
+                            "description": "Optional upper bound on how long to poll before failing.",
+                            "default": 600,
+                        },
+                        "poll_interval_seconds": {
+                            "type": "number",
+                            "description": "Initial delay between polls.",
+                            "default": 3,
+                        },
+                        "max_poll_interval_seconds": {
+                            "type": "number",
+                            "description": "Upper bound for the exponential backoff poll interval.",
+                            "default": 30,
                         }
                     },
                     "required": ["branch_id"],
