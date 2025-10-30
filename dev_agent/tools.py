@@ -239,6 +239,35 @@ class ToolExecutionError(RuntimeError):
     """Raised when a tool call cannot be executed."""
 
 
+class BranchTracker:
+    """Track the starting and latest branch ids observed during tool execution."""
+
+    def __init__(self, start_branch_id: Optional[str] = None) -> None:
+        self._start_branch_id = start_branch_id
+        self._latest_branch_id = start_branch_id
+
+    def record(self, branch_id: Optional[str]) -> None:
+        if not branch_id or not isinstance(branch_id, str):
+            return
+        if not self._start_branch_id:
+            self._start_branch_id = branch_id
+        self._latest_branch_id = branch_id
+
+    @property
+    def start_branch_id(self) -> Optional[str]:
+        return self._start_branch_id
+
+    @property
+    def latest_branch_id(self) -> Optional[str]:
+        return self._latest_branch_id
+
+    def as_dict(self) -> Dict[str, Optional[str]]:
+        return {
+            "start_branch_id": self._start_branch_id,
+            "latest_branch_id": self._latest_branch_id,
+        }
+
+
 class ToolHandler:
     """Dispatches OpenAI tool calls to MCP client operations."""
 
@@ -248,10 +277,12 @@ class ToolHandler:
         default_project_name: Optional[str],
         *,
         max_branches: int = 4,
+        start_branch_id: Optional[str] = None,
     ) -> None:
         self._client = client
         self._default_project_name = default_project_name
         self._max_branches = max_branches
+        self._branch_tracker = BranchTracker(start_branch_id)
 
     def handle(self, tool_call: Any) -> Dict[str, Any]:
         """Execute a tool call from OpenAI and return serializable result."""
@@ -285,6 +316,11 @@ class ToolHandler:
             return self._error(f"Execution error: {exc}")
 
         return {"status": "success", "data": result}
+
+    @property
+    def branch_range(self) -> Dict[str, Optional[str]]:
+        """Expose the observed branch range."""
+        return self._branch_tracker.as_dict()
 
     def _execute_agent(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         agent = arguments.get("agent")
@@ -320,7 +356,10 @@ class ToolHandler:
             raise ToolExecutionError(str(response.get("error") or response))
         branches = response.get("branches") if isinstance(response, dict) else None
         primary_branch = branches[0] if isinstance(branches, list) and branches else None
-        branch_id = primary_branch.get("branch_id") if isinstance(primary_branch, dict) else None
+        branch_id = self._extract_branch_id(primary_branch or {})
+        if not branch_id:
+            raise ToolExecutionError("Missing branch id in parallel_explore response.")
+        self._branch_tracker.record(branch_id)
         return {
             "parallel_explore": response,
             "branch_id": branch_id,
@@ -362,6 +401,7 @@ class ToolHandler:
             )
 
             if status in {"succeed", "failed"}:
+                self._record_branch_from_status(response)
                 return response
 
             if time.monotonic() >= deadline:
@@ -376,6 +416,7 @@ class ToolHandler:
                 status or "unknown",
                 sleep_interval,
             )
+            self._record_branch_from_status(response)
             time.sleep(sleep_interval)
             sleep_interval = min(sleep_interval * 1.5, float(max_interval))
 
@@ -388,6 +429,28 @@ class ToolHandler:
             raise ToolExecutionError("`path` string argument is required.")
         logger.info("Reading artifact %s from branch %s", path, branch_id)
         return self._client.branch_read_file(branch_id, path)
+
+    def _record_branch_from_status(self, response: Dict[str, Any]) -> None:
+        branch_id = self._extract_branch_id(response)
+        if not branch_id:
+            raise ToolExecutionError("Branch status response missing branch identifier.")
+        self._branch_tracker.record(branch_id)
+
+    @staticmethod
+    def _extract_branch_id(response: Any) -> Optional[str]:
+        if not isinstance(response, dict):
+            return None
+        for key in ("branch_id", "id"):
+            value = response.get(key)
+            if isinstance(value, str) and value:
+                return value
+        branch_info = response.get("branch")
+        if isinstance(branch_info, dict):
+            for key in ("branch_id", "id"):
+                value = branch_info.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return None
 
     @staticmethod
     def _error(message: str) -> Dict[str, Any]:
