@@ -312,7 +312,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         cfg.azure_api_version,
     )
     mcp_client = MCPClient(cfg.mcp_base_url)
-    handler = ToolHandler(mcp_client, cfg.project_name)
+    handler = ToolHandler(
+        mcp_client,
+        cfg.project_name,
+        start_branch_id=args.parent_branch_id,
+    )
 
     messages = build_initial_messages(task, cfg, args.parent_branch_id)
     final_report = orchestrate(brain, handler, messages) if headless else chat_loop(brain, handler, messages)
@@ -320,6 +324,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not final_report:
         return 1
 
+    branch_range = handler.branch_range
+    start_branch_id = branch_range.get("start_branch_id")
+    latest_branch_id = branch_range.get("latest_branch_id")
+    if start_branch_id:
+        final_report["start_branch_id"] = start_branch_id
+    if latest_branch_id:
+        final_report["latest_branch_id"] = latest_branch_id
     final_report.setdefault("task", task)
     print(json.dumps(final_report, indent=2))
     return 0
