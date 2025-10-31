@@ -13,11 +13,8 @@ dependencies = [
 [project.scripts]
 dev-agent = "dev_agent.main:main"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
 [tool.setuptools.packages.find]
-where = ["src"]
+include = ["dev_agent*"]
 
 [build-system]
 requires = ["setuptools>=68"]
