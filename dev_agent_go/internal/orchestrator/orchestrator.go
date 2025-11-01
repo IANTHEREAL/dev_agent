@@ -93,6 +93,11 @@ Fix all P0/P1 issues reported in the review.
 
 const maxIterations = 8
 
+type publishHandler interface {
+	BranchRange() map[string]string
+	Handle(t.ToolCall) map[string]any
+}
+
 type PublishOptions struct {
 	GitHubToken    string
 	WorkspaceDir   string
@@ -101,7 +106,7 @@ type PublishOptions struct {
 	Task           string
 }
 
-func finalizeBranchPush(handler *t.ToolHandler, opts PublishOptions, report map[string]any, success bool) (string, error) {
+func finalizeBranchPush(handler publishHandler, opts PublishOptions, report map[string]any, success bool) (string, error) {
 	if opts.GitHubToken == "" {
 		return "", errors.New("missing GitHub token for publish step")
 	}
@@ -131,7 +136,7 @@ func finalizeBranchPush(handler *t.ToolHandler, opts PublishOptions, report map[
 		outcome = "Reached iteration limit before clean review sign-off."
 	}
 
-	meta := fmt.Sprintf("commit-meta: workspace=%s start_branch=%s latest_branch=%s parent_branch=%s", opts.WorkspaceDir, lineage["start_branch_id"], lineage["latest_branch_id"], parent)
+	meta := fmt.Sprintf("commit-meta: start_branch=%s latest_branch=%s", lineage["start_branch_id"], lineage["latest_branch_id"])
 	tokenLiteral := strconv.Quote(opts.GitHubToken)
 	prompt := fmt.Sprintf(`Finalize the task by committing and pushing the current workspace state.
 
@@ -140,7 +145,7 @@ Outcome: %s
 GitHub access token (export for git auth and unset afterwards): %s
 Meta (include in the commit message if helpful): %s
 
-Use the workspace at %s. Choose an appropriate branch name for this task, commit the current changes, push to origin, and reply with the branch name and commit hash. Do not print the raw token anywhere except when configuring git.`, opts.Task, outcome, tokenLiteral, meta, opts.WorkspaceDir)
+Choose an appropriate git branch name for this task, commit the current changes, push to remote repository, and reply with the branch name and commit hash. Do not print the raw token anywhere except when configuring git.`, opts.Task, outcome, tokenLiteral, meta)
 
 	logx.Infof("Finalizing workflow by asking claude_code to push from branch %s lineage.", parent)
 	execArgs := map[string]any{
