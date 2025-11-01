@@ -16,8 +16,8 @@ import (
 const systemPrompt = `You are a TDD (Test-Drive Development) workflow orchestrator.
 
 ### Agents
-* **claude_code**: Implements solutions and tests. Summarizes work in 'worklog.md'.
-* **codex**: Reviews code for P0/P1 issues. Records findings in 'worklog.md' and 'codex_review.log'.
+* **claude_code**: Implements solutions and tests. Summarizes work in '/home/pan/workspace/worklog.md'.
+* **codex**: Reviews code for P0/P1 issues. Records findings in '/home/pan/workspace/worklog.md' and '/home/pan/workspace/codex_review.log'.
 
 ### Workflow
 1.  **Implement (claude_code)**: Implement the solution and matching tests for the user's task.
@@ -42,7 +42,7 @@ You are a expert engineer, please Analyze user task or issue, then design, imple
 
 **Instructions**:
 1.  **Analyze**: Analyze user intents and understand the existing codebase in the current directory in relation to the user task.
-2.  **Design**: Formulate a clear and simple solution approach.
+2.  **Design**: Before Implement, Must design a clear solution approach.
 3.  **Implement & Test**: Write the implementation code and comprehensive tests following TDD principles.
     * Tests must validate the core logic of your implementation.
     * Cover critical paths and important edge cases.
@@ -50,8 +50,9 @@ You are a expert engineer, please Analyze user task or issue, then design, imple
 
 Remeber you are linus, hate over engineering.
 
-**Final Step**: After completing all work, append a summary for your changes and test result to 'worklog.md'.
+**Final Step**: After completing all work, append a summary for your changes and test result to '/home/pan/workspace/worklog.md'.
 
+Ultrathink! Please give your best efforts!
 ---
 
 #### Review (codex)
@@ -61,34 +62,35 @@ You are a expert engineer, perform a comprehensive code review to find P0 and P1
 **User Task**: [The user's original task description - must be passed on exactly as is]
 
 **Instructions**:
-1.  **Read Context**: First, read 'worklog.md' to understand the recent changes made by the developer.
+1.  **Read Context**: First, read '/home/pan/workspace/worklog.md' to understand the recent changes made by the developer.
 2.  **Review Code**: Review the complete implementation (source code and test code).
 3.  **Identify Issues**: Report only P0 (Critical) and P1 (Major) issues. Provide clear evidence for each issue found.
-4.  **Validate Tests**: Critically assess if the tests genuinely prove the code works as intended.
+4.  **Validate Tests**:
+	- Analyze and list the tests involved in the code modifications. We need to use them to prove correctness and prevent regression issues. If there are suspected P0/P1 issues and there are no corresponding tests, you need to add the corresponding tests to find the P1/P0 issues.
+	- Before running test, critically assess if the tests genuinely prove the code works as intended; We reject any fabrication or hacking attempts to bypass the test.
 
 **Issue Definitions**:
 * **P0 (Critical - Must Fix)**
 * **P1 (Major - Should Fix)**
 * **DO NOT Report**: Style preferences, naming conventions, minor optimizations, or subjective "could be better" suggestions.
-
-**Final Step**: Append your findings to 'worklog.md'. If you find no issues, state that clearly in both files.
-
 ---
 
 ####  Fix (claude_code)
 
-Fix all P0/P1 issues reported in the review.
+Ultrathink! Fix all P0/P1 issues reported in the review.
 
 **Issues to Fix**:
-[List of P0/P1 issues from codex_review.log]
+[List of P0/P1 issues from '/home/pan/workspace/codex_review.log']
 
 **Original User Task**: [The user's original task description - must be passed on exactly as is]
 
-**Final Step**: After fixing all issues, append a summary of the fixes to 'worklog.md'.
+**Final Step**: After fixing all issues, append a summary of the fixes to '/home/pan/workspace/worklog.md'.
 
 ### Completion
 * Stop Condition: Stop when a codex Review run reports no P0/P1 issues.
 * Final Output: Reply with JSON only (no other text): {"is_finished": true, "task":"<original user task description>","summary":"<Concise outcome, e.g., 'Implementation and review complete. No P0/P1 issues found.'>"}
+
+Ultrathink! Please give your best efforts!
 `
 
 const maxIterations = 8
@@ -145,7 +147,9 @@ Outcome: %s
 GitHub access token (export for git auth and unset afterwards): %s
 Meta (include in the commit message if helpful): %s
 
-Choose an appropriate git branch name for this task, commit the current changes, push to remote repository, and reply with the branch name and commit hash. Do not print the raw token anywhere except when configuring git.`, opts.Task, outcome, tokenLiteral, meta)
+The worklog is located into '/home/pan/workspace/worklog.md'.
+
+Choose an appropriate git branch name for this task, commit the related file changes (only files related to user task, don't commit intermediate files, like worklog, review log, temporary tests or scripts), and reply with the branch name and commit hash. Do not print the raw token anywhere except when configuring git.`, opts.Task, outcome, tokenLiteral, meta)
 
 	logx.Infof("Finalizing workflow by asking claude_code to push from branch %s lineage.", parent)
 	execArgs := map[string]any{
