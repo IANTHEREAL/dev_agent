@@ -252,9 +252,10 @@ func Orchestrate(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMes
 	var (
 		finalReport map[string]any
 		finished    bool
+		reviewCount int
 	)
 
-	for i := 1; i <= maxIterations; i++ {
+	for i := 1; ; i++ {
 		logx.Infof("LLM iteration %d", i)
 		resp, err := brain.Complete(messages, tools)
 		if err != nil {
@@ -264,10 +265,11 @@ func Orchestrate(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMes
 		messages = append(messages, assistantMessageToDict(choice))
 
 		if len(choice.ToolCalls) > 0 {
-			checkOnly := true
+			reviewCompleted := false
 			for _, tc := range choice.ToolCalls {
-				if tc.Function.Name != "check_status" {
-					checkOnly = false
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 				}
 				htc := t.ToolCall{ID: tc.ID, Type: tc.Type}
 				htc.Function.Name = tc.Function.Name
@@ -275,10 +277,22 @@ func Orchestrate(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMes
 				result := handler.Handle(htc)
 				toolMsg := b.ChatMessage{Role: "tool", ToolCallID: tc.ID, Content: toJSON(result)}
 				messages = append(messages, toolMsg)
+
+				if tc.Function.Name == "execute_agent" {
+					if agent, _ := args["agent"].(string); agent == "codex" {
+						if status, _ := result["status"].(string); status == "success" {
+							reviewCompleted = true
+						}
+					}
+				}
 			}
-			if checkOnly {
-				logx.Debugf("Skipping iteration count for check_status-only tool call.")
-				i--
+			if reviewCompleted {
+				reviewCount++
+				logx.Infof("Completed review iteration %d/%d", reviewCount, maxIterations)
+				if reviewCount >= maxIterations {
+					logx.Errorf("Reached review iteration limit without final report.")
+					break
+				}
 			}
 			continue
 		}
@@ -292,20 +306,13 @@ func Orchestrate(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMes
 	}
 
 	if finished {
-		branchID, err := finalizeBranchPush(handler, publishOpts, finalReport, true)
+		_, err := finalizeBranchPush(handler, publishOpts, finalReport, true)
 		if err != nil {
 			return nil, err
-		}
-		if finalReport == nil {
-			finalReport = map[string]any{}
-		}
-		if branchID != "" {
-			finalReport["publish_branch_id"] = branchID
 		}
 		return finalReport, nil
 	}
 
-	logx.Errorf("Reached maximum iterations without final report.")
 	branchID, err := finalizeBranchPush(handler, publishOpts, nil, false)
 	if err != nil {
 		return nil, err
@@ -324,9 +331,10 @@ func ChatLoop(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMessag
 	var (
 		finalReport map[string]any
 		finished    bool
+		reviewCount int
 	)
 
-	for i := 1; i <= maxIters; i++ {
+	for i := 1; ; i++ {
 		fmt.Printf("[iter %d] requesting completion...\n", i)
 		resp, err := brain.Complete(messages, tools)
 		if err != nil {
@@ -339,11 +347,12 @@ func ChatLoop(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMessag
 		messages = append(messages, assistantMessageToDict(choice))
 
 		if len(choice.ToolCalls) > 0 {
-			checkOnly := true
+			reviewCompleted := false
 			for _, tc := range choice.ToolCalls {
 				fmt.Printf("tool> %s %s\n", tc.Function.Name, tc.Function.Arguments)
-				if tc.Function.Name != "check_status" {
-					checkOnly = false
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 				}
 				htc := t.ToolCall{ID: tc.ID, Type: tc.Type}
 				htc.Function.Name = tc.Function.Name
@@ -355,10 +364,22 @@ func ChatLoop(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMessag
 				}
 				fmt.Printf("tool< %s\n", js)
 				messages = append(messages, b.ChatMessage{Role: "tool", ToolCallID: tc.ID, Content: toJSON(result)})
+
+				if tc.Function.Name == "execute_agent" {
+					if agent, _ := args["agent"].(string); agent == "codex" {
+						if status, _ := result["status"].(string); status == "success" {
+							reviewCompleted = true
+						}
+					}
+				}
 			}
-			if checkOnly {
-				fmt.Println("note: check_status only; iteration counter unchanged.")
-				i--
+			if reviewCompleted {
+				reviewCount++
+				fmt.Printf("note: completed review iteration %d/%d\n", reviewCount, maxIters)
+				if reviewCount >= maxIters {
+					logx.Errorf("Reached review iteration limit without final report.")
+					break
+				}
 			}
 			continue
 		}
@@ -372,20 +393,13 @@ func ChatLoop(brain *b.LLMBrain, handler *t.ToolHandler, messages []b.ChatMessag
 	}
 
 	if finished {
-		branchID, err := finalizeBranchPush(handler, publishOpts, finalReport, true)
+		_, err := finalizeBranchPush(handler, publishOpts, finalReport, true)
 		if err != nil {
 			return nil, err
-		}
-		if finalReport == nil {
-			finalReport = map[string]any{}
-		}
-		if branchID != "" {
-			finalReport["publish_branch_id"] = branchID
 		}
 		return finalReport, nil
 	}
 
-	fmt.Fprintln(os.Stderr, "error: reached iteration limit without final report")
 	branchID, err := finalizeBranchPush(handler, publishOpts, nil, false)
 	if err != nil {
 		return nil, err
