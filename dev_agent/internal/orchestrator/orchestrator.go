@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	b "dev_agent/internal/brain"
 	"dev_agent/internal/logx"
@@ -170,47 +171,19 @@ Choose an appropriate git branch name for this task, commit the related file cha
 		return "", fmt.Errorf("publish execute_agent failed: %v", execResp)
 	}
 	data, _ := execResp["data"].(map[string]any)
-	branchID := extractBranchIDFromData(data)
+	branchID := t.ExtractBranchID(data)
 	if branchID == "" {
 		return "", errors.New("publish execute_agent missing branch id")
 	}
 
-	checkArgs := map[string]any{"branch_id": branchID}
-	checkBytes, _ := json.Marshal(checkArgs)
-	checkCall := t.ToolCall{Type: "function"}
-	checkCall.Function.Name = "check_status"
-	checkCall.Function.Arguments = string(checkBytes)
-
-	checkResp := handler.Handle(checkCall)
-	if status, _ := checkResp["status"].(string); status != "success" {
-		return "", fmt.Errorf("publish check_status failed: %v", checkResp)
+	if branchStatus := strings.TrimSpace(fmt.Sprintf("%v", data["status"])); branchStatus != "" {
+		switch strings.ToLower(branchStatus) {
+		case "failed":
+			return "", fmt.Errorf("publish branch %s completed with failure status", branchID)
+		}
 	}
+
 	return branchID, nil
-}
-
-func extractBranchIDFromData(data map[string]any) string {
-	if data == nil {
-		return ""
-	}
-	if id, _ := data["branch_id"].(string); id != "" {
-		return id
-	}
-	if id, _ := data["id"].(string); id != "" {
-		return id
-	}
-	if branch, _ := data["branch"].(map[string]any); branch != nil {
-		if id := extractBranchIDFromData(branch); id != "" {
-			return id
-		}
-	}
-	if pe, _ := data["parallel_explore"].(map[string]any); pe != nil {
-		if branches, _ := pe["branches"].([]any); len(branches) > 0 {
-			if m, _ := branches[0].(map[string]any); m != nil {
-				return extractBranchIDFromData(m)
-			}
-		}
-	}
-	return ""
 }
 
 func BuildInitialMessages(task, projectName, workspaceDir, parentBranchID string) []b.ChatMessage {

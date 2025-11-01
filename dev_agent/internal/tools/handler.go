@@ -114,12 +114,7 @@ func (h *ToolHandler) executeAgent(arguments map[string]any) (map[string]any, er
 	if isErr, ok := resp["isError"].(bool); ok && isErr {
 		return nil, ToolExecutionError{Msg: fmt.Sprintf("%v", resp["error"])}
 	}
-	var branchID string
-	if branches, ok := resp["branches"].([]any); ok && len(branches) > 0 {
-		if m, ok := branches[0].(map[string]any); ok {
-			branchID = extractBranchID(m)
-		}
-	}
+	branchID := ExtractBranchID(resp)
 	if branchID == "" {
 		return nil, ToolExecutionError{Msg: "Missing branch id in parallel_explore response."}
 	}
@@ -178,7 +173,7 @@ func (h *ToolHandler) checkStatus(arguments map[string]any) (map[string]any, err
 			return nil, err
 		}
 		// Record/validate branch id
-		if id := extractBranchID(resp); id != "" {
+		if id := ExtractBranchID(resp); id != "" {
 			h.branchTracker.Record(id)
 		} else {
 			return nil, ToolExecutionError{Msg: "Branch status response missing branch identifier."}
@@ -209,16 +204,37 @@ func (h *ToolHandler) readArtifact(arguments map[string]any) (map[string]any, er
 	return h.client.BranchReadFile(branchID, path)
 }
 
-func extractBranchID(m map[string]any) string {
+func ExtractBranchID(m map[string]any) string {
+	if m == nil {
+		return ""
+	}
 	for _, k := range []string{"branch_id", "id"} {
 		if v, ok := m[k].(string); ok && v != "" {
 			return v
 		}
 	}
 	if b, ok := m["branch"].(map[string]any); ok {
-		for _, k := range []string{"branch_id", "id"} {
-			if v, ok := b[k].(string); ok && v != "" {
-				return v
+		if id := ExtractBranchID(b); id != "" {
+			return id
+		}
+	}
+	if pe, ok := m["parallel_explore"].(map[string]any); ok {
+		if branches, ok := pe["branches"].([]any); ok {
+			for _, item := range branches {
+				if nested, _ := item.(map[string]any); nested != nil {
+					if id := ExtractBranchID(nested); id != "" {
+						return id
+					}
+				}
+			}
+		}
+	}
+	if branches, ok := m["branches"].([]any); ok {
+		for _, item := range branches {
+			if nested, _ := item.(map[string]any); nested != nil {
+				if id := ExtractBranchID(nested); id != "" {
+					return id
+				}
 			}
 		}
 	}
