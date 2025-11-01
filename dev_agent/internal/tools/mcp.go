@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"dev_agent_go/internal/logx"
+	"dev_agent/internal/logx"
 )
 
 type MCPError struct{ Msg string }

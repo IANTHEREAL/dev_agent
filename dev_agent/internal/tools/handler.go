@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"dev_agent_go/internal/logx"
+	"dev_agent/internal/logx"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -124,7 +124,31 @@ func (h *ToolHandler) executeAgent(arguments map[string]any) (map[string]any, er
 		return nil, ToolExecutionError{Msg: "Missing branch id in parallel_explore response."}
 	}
 	h.branchTracker.Record(branchID)
-	return map[string]any{"parallel_explore": resp, "branch_id": branchID}, nil
+
+	result := map[string]any{"parallel_explore": resp, "branch_id": branchID}
+
+	logx.Infof("Waiting for branch %s to complete.", branchID)
+	statusArgs := map[string]any{"branch_id": branchID}
+	if v, ok := arguments["timeout_seconds"].(float64); ok && v > 0 {
+		statusArgs["timeout_seconds"] = v
+	}
+	if v, ok := arguments["poll_interval_seconds"].(float64); ok && v > 0 {
+		statusArgs["poll_interval_seconds"] = v
+	}
+	if v, ok := arguments["max_poll_interval_seconds"].(float64); ok && v > 0 {
+		statusArgs["max_poll_interval_seconds"] = v
+	}
+
+	statusResp, err := h.checkStatus(statusArgs)
+	if err != nil {
+		return nil, err
+	}
+	result["branch"] = statusResp
+	if status, ok := statusResp["status"]; ok {
+		result["status"] = status
+	}
+
+	return result, nil
 }
 
 func (h *ToolHandler) checkStatus(arguments map[string]any) (map[string]any, error) {
@@ -235,29 +259,15 @@ func GetToolDefinitions() []map[string]any {
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"agent":            map[string]any{"type": "string", "description": "Target specialist agent name."},
-						"prompt":           map[string]any{"type": "string", "description": "Prompt for the agent."},
-						"project_name":     map[string]any{"type": "string", "description": "Pantheon project name."},
-						"parent_branch_id": map[string]any{"type": "string", "description": "Branch UUID to branch from."},
+						"agent":                     map[string]any{"type": "string", "description": "Target specialist agent name."},
+						"prompt":                    map[string]any{"type": "string", "description": "Prompt for the agent."},
+						"project_name":              map[string]any{"type": "string", "description": "Pantheon project name."},
+						"parent_branch_id":          map[string]any{"type": "string", "description": "Branch UUID to branch from."},
+						"timeout_seconds":           map[string]any{"type": "number", "description": "Optional override for completion polling timeout."},
+						"poll_interval_seconds":     map[string]any{"type": "number", "description": "Optional override for initial poll interval."},
+						"max_poll_interval_seconds": map[string]any{"type": "number", "description": "Optional override for maximum poll interval."},
 					},
 					"required": []any{"agent", "prompt", "project_name", "parent_branch_id"},
-				},
-			},
-		},
-		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "check_status",
-				"description": "Fetch status information for an MCP branch id.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"branch_id":                 map[string]any{"type": "string", "description": "Branch UUID returned from execute_agent."},
-						"timeout_seconds":           map[string]any{"type": "number", "default": 1800},
-						"poll_interval_seconds":     map[string]any{"type": "number", "default": 3},
-						"max_poll_interval_seconds": map[string]any{"type": "number", "default": 30},
-					},
-					"required": []any{"branch_id"},
 				},
 			},
 		},

@@ -7,13 +7,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-)
 
-import (
-	b "dev_agent_go/internal/brain"
-	cfg "dev_agent_go/internal/config"
-	o "dev_agent_go/internal/orchestrator"
-	t "dev_agent_go/internal/tools"
+	b "dev_agent/internal/brain"
+	cfg "dev_agent/internal/config"
+	o "dev_agent/internal/orchestrator"
+	t "dev_agent/internal/tools"
 )
 
 func main() {

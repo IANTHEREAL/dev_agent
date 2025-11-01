@@ -7,10 +7,10 @@ import (
 	"os"
 	"strconv"
 
-	b "dev_agent_go/internal/brain"
-	"dev_agent_go/internal/logx"
+	b "dev_agent/internal/brain"
+	"dev_agent/internal/logx"
 
-	t "dev_agent_go/internal/tools"
+	t "dev_agent/internal/tools"
 )
 
 const systemPrompt = `You are a TDD (Test-Drive Development) workflow orchestrator.
@@ -26,7 +26,7 @@ const systemPrompt = `You are a TDD (Test-Drive Development) workflow orchestrat
 4.  Repeat **Review** and **Fix** until 'codex' reports no P0/P1 issues.
 
 ### Your Orchestration Rules
-1.  **Call Agents**: For each workflow step, call 'execute_agent'. After the call, use 'check_status' once to monitor completion.
+1.  **Call Agents**: For each workflow step, call 'execute_agent'.
 2.  **Maintain State**: Track branch lineage ('parent_branch_id') and report any tool errors immediately.
 3.  **Handle Review Data**: Before launching a **Fix** run, you **must** use 'read_artifact' to get the issues from 'codex_review.log'.
 
@@ -219,7 +219,7 @@ func BuildInitialMessages(task, projectName, workspaceDir, parentBranchID string
 		"parent_branch_id": parentBranchID,
 		"project_name":     projectName,
 		"workspace_dir":    workspaceDir,
-		"notes":            "For every phase: craft an execute_agent prompt covering task, phase goal, context, then call check_status once. Track branch lineage and stop when codex reports no P0/P1 issues.",
+		"notes":            "For every phase: craft an execute_agent prompt covering task, phase goal, context. Track branch lineage and stop when codex reports no P0/P1 issues.",
 	}
 	content, _ := json.MarshalIndent(userPayload, "", "  ")
 	return []b.ChatMessage{
