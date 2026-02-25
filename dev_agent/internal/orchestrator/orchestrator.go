@@ -61,19 +61,53 @@ Before you start coding: Read as much as you can, you have unlimited read quotas
 
 2.  **Phase 1: Analysis & Design** (Only if Phase 0 passes)
 	* Read as much as you can, you have unlimited read quotas and available contexts. When you are not sure about something, you must study the code until you figure out.
-    * **Analyze**:
-        * **For Bugs**: Perform Root Cause Analysis (RCA). Locate the code causing the issue.
-        * **For Features**: Identify all code paths and files that need modification.
-    * **Design**: Outline your solution strategy in '%[1]s/worklog.md'.
+    
+    **1.1 Root Cause Analysis**
+    * **Bugs**: Locate exact issue location (file/function/line). Trace symptoms→root cause via error stacks/logs/data flows. Identify fundamental reason (logic/race/assumption/validation issues), not symptoms.
+    * **Features**: Identify all code paths/files needing modification. Understand architecture and feature integration.
+    
+    **1.2 Dependency Analysis** (Find ALL affected code)
+    * **Callers**: Find ALL functions calling problematic code (direct + indirect via call chains). Use grep/go doc/go list.
+    * **Callees**: Find ALL functions called by problematic code (direct + indirect dependencies).
+    * **Data Flow**: Trace data paths in/out. Identify shared state (globals, package vars, shared structs). Find config dependencies.
+    * **Control Flow**: Analyze conditional branches, exception paths, concurrent/async paths if applicable.
+    * **Modules**: Identify affected packages/modules, package dependencies/interfaces, public API impact.
+    
+    **1.3 Configuration & Parameters** (Find system settings)
+    * **Config Files**: Scan config.yaml/json/toml/.env. Find related params (timeouts, retries, limits). Document current/default values.
+    * **Runtime Params**: Find timeouts ("timeout", "deadline", "30 minutes"), retry limits ("maxRetries", "maxIterations"), concurrency ("maxConcurrency", "poolSize"), buffers ("bufferSize", "cacheSize").
+    * **Env Vars**: Check os.Getenv/os.LookupEnv usage. Document relevant vars.
+    * **Constants**: Find const/var declarations, magic numbers, defaults/limits, config-related constants.
+    * **Impact**: Understand how each parameter affects the issue. Note which may need adjustment and validation rules.
+    
+    **1.4 Impact Assessment**
+    * **Code**: Direct (must modify) + indirect (may be affected: callers/callees/shared state). List: [File] → [Function] → [Reason].
+    * **Functional**: Affected modules/components, user-visible changes, feature dependencies.
+    * **Test**: Existing test files, tests needing updates, coverage gaps, regression tests for bugs.
+    * **Performance** (if applicable): Performance-critical paths, potential performance implications.
+    * **Integration**: Integration points with other modules/services, external dependencies.
+    
+    **1.5 Design Strategy & Documentation**
+    * Outline solution: fix approach, modification plan (files/functions), config changes, test strategy, risk mitigation.
+    * **Write to '%[1]s/worklog.md'**: Root cause, affected locations (direct+indirect), config/parameter findings, impact assessment, design strategy.
 
 3.  **Phase 2: TDD Implementation**
-	* **Test**: Write tests first. For bugs, ensure you have a regression test.
-	* **Code**: Implement the solution according to your design.
-	* **Verify**: Ensure local tests pass.
+	* **CRITICAL: Use Phase 1 Analysis from '%[1]s/worklog.md'**
+		* Read worklog.md before starting. It contains: root cause, all affected locations (direct+indirect), config/parameter findings, impact assessment, design strategy.
+		* **MUST address ALL identified code locations** (not just direct problem).
+		* **MUST consider ALL identified configuration parameters**.
+		* **MUST follow Phase 1's test strategy**.
+	
+	* **Test First**: Write tests before code. For bugs, add regression tests.
+		* Use Phase 1's test impact analysis. Add tests for identified coverage gaps. Cover direct + indirect impact areas.
+	
+	* **Implement**: Fix root cause. Modify ALL files/functions from Phase 1 impact assessment (direct + indirect). Adjust config parameters (config files/constants/env vars). Handle all dependencies (callers/callees/shared state). Follow Phase 1 design strategy.
+	
+	* **Verify**: Run all relevant tests (direct/indirect affected code, new regression tests, updated existing tests).
+	
+    * **Git Discipline**: Work locally only. You may create/checkout branches and stage/commit locally, but do **NOT** push, and do **NOT** create PRs (e.g., via 'gh pr create') during this phase.
 
-	* **Git Discipline**: Work locally only. You may create/checkout branches and stage/commit locally, but do **NOT** push, and do **NOT** create PRs (e.g., via 'gh pr create') during this phase.
-
-3.  **Final Step**: Update '%[1]s/worklog.md' with a summary of changes and test results.
+4.  **Final Step**: Update '%[1]s/worklog.md' with: files actually modified, deviations from Phase 1 plan (if any) and reasons, test results, confirmation that all identified locations were addressed.
 
 Ultrathink! Analyze first, then code. Avoid over-engineering.
 ---
@@ -82,12 +116,25 @@ Ultrathink! Analyze first, then code. Avoid over-engineering.
 
 **User Task**: [The user's original task description]
 
+**Phase 1 Analysis Reference** (Optional but recommended):
+* If '%[1]s/worklog.md' contains Phase 1 analysis, review it to understand:
+	* The intended scope of changes (all affected code locations)
+	* Configuration parameters that should have been adjusted
+	* Test strategy that should have been followed
+* Use this context to verify that the implementation addressed all identified areas.
+
 **Instructions**:
 1.  **Review Code Changes**: Review the recent modifications and tests to determine if they satisfy the User Task.
-2.  **Scope**: Focus **ONLY** on the changed code and the direct impact of these changes.
-    * **Do NOT** review unrelated legacy code or pre-existing issues unless they are made worse by this change.
-3.  **Report**: Identify and log **P0 (Critical)** or **P1 (Major)** issues to '%[1]s/code_review.log'.
+	* Check if the implementation addressed all code locations identified in Phase 1 analysis (if available).
+	* Verify that configuration parameters identified in Phase 1 were properly handled.
+	* Confirm that the test strategy from Phase 1 was followed.
+2.  **Check Merge Conflicts** (Pre-PR): Fetch latest remote (git fetch origin), find base branch (main/master), test merge (git merge --no-commit --no-ff origin/main then abort). If conflicts found, report as **P0**. If same files modified but no conflict, report as **P1** risk.
+3.  **Scope**: 
+    * **Review Focus**: Focus on reviewing the changed code and its direct impact. Do NOT review unrelated legacy code or pre-existing issues unless they are made worse by this change.
+    * **Phase 1 Verification**: Verify that all code locations identified in Phase 1 analysis were properly addressed (including both direct and indirect impact areas). If Phase 1 identified indirect impact areas that should have been addressed but weren't, flag this as a P1 issue.
+4.  **Report**: Identify and log **P0 (Critical)** or **P1 (Major)** issues to '%[1]s/code_review.log', including merge conflict check results.
     * If the code meets the requirements and has no critical/major issues, report "No P0/P1 issues found".
+    * If Phase 1 analysis identified areas that weren't addressed, mention this in the review.
 
 Hints: if needed, Use the 'gh' CLI to inspect GitHub issues/PRs just like 'git'; if either tool lacks auth, run '~/.setup-git.sh' to configure both before proceeding.
 
